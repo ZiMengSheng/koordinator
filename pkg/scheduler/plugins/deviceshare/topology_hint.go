@@ -201,9 +201,9 @@ func (p *Plugin) generateTopologyHints(cycleState *framework.CycleState, state *
 
 	// update hints preferred according to multiNUMAGroups, in case when it wasn't provided, the default
 	// behavior to prefer the minimal amount of NUMA nodes will be used
-	for resourceName, size := range minAffinitySize {
-		for i, hint := range hints[string(resourceName)] {
-			hints[string(resourceName)][i].Preferred = len(hint.NUMANodeAffinity.GetBits()) == size
+	for resourceName := range minAffinitySize {
+		for i := range hints[string(resourceName)] {
+			hints[string(resourceName)][i].Preferred = true
 		}
 
 		h := hints[string(resourceName)]

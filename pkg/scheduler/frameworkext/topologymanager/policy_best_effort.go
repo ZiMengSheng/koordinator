@@ -42,6 +42,12 @@ func (p *bestEffortPolicy) canAdmitPodResult(hint *NUMATopologyHint) bool {
 	return true
 }
 
+/*
+1. 优先选择 preferred hint，即所有资源都 prefer 且所有资源的 NUMA Node 是对齐的；
+2. 如果都是 prefer 或者都不是 prefer，选择 bitwise AND 出的 NUMANode 更少的
+3. 如果 prefer 一致且 merge 出的 NUMANode 一致，那么选择 score 更高的
+*/
+
 func (p *bestEffortPolicy) Merge(providersHints []map[string][]NUMATopologyHint, exclusivePolicy apiext.NumaTopologyExclusive, allNUMANodeStatus []apiext.NumaNodeStatus) (NUMATopologyHint, bool) {
 	filteredProvidersHints := filterProvidersHints(providersHints)
 	bestHint := mergeFilteredHints(p.numaNodes, filteredProvidersHints, exclusivePolicy, allNUMANodeStatus)

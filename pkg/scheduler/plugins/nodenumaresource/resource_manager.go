@@ -558,9 +558,8 @@ func (c *resourceManager) generateResourceHints(node *corev1.Node, pod *corev1.P
 	// update hints preferred according to multiNUMAGroups, in case when it wasn't provided, the default
 	// behavior to prefer the minimal amount of NUMA nodes will be used
 	for resourceName := range options.requests {
-		minAffinitySize := generator.minAffinitySize[resourceName]
-		for i, hint := range generator.hints[string(resourceName)] {
-			generator.hints[string(resourceName)][i].Preferred = len(hint.NUMANodeAffinity.GetBits()) == minAffinitySize || policy == apiext.NUMATopologyPolicyRestricted
+		for i := range generator.hints[string(resourceName)] {
+			generator.hints[string(resourceName)][i].Preferred = true
 		}
 	}
 
