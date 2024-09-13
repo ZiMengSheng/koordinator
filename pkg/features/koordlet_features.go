@@ -104,6 +104,9 @@ const (
 	// Accelerators enables GPU related feature in koordlet. Only Nvidia GPUs supported.
 	Accelerators featuregate.Feature = "Accelerators"
 
+	// owner: @ZiMengSheng
+	NetDevices featuregate.Feature = "NetDevices"
+
 	// owner: @songtao98 @zwzhang0107
 	// alpha: v1.0
 	//

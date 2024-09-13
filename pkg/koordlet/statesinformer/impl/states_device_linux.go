@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 
 	"github.com/koordinator-sh/koordinator/apis/extension"
 	schedulingv1alpha1 "github.com/koordinator-sh/koordinator/apis/scheduling/v1alpha1"
@@ -51,6 +52,12 @@ func (s *statesInformer) reportDevice() {
 
 	device := s.buildBasicDevice(node)
 	s.fillGPUDevice(device, gpuDevices, gpuModel, gpuDriverVer)
+
+	rdmaDevices := s.buildRDMADevice()
+	if len(rdmaDevices) != 0 {
+		device.Spec.Devices = append(device.Spec.Devices, rdmaDevices...)
+		return
+	}
 
 	err := s.updateDevice(device)
 	if err == nil {
@@ -185,6 +192,58 @@ func (s *statesInformer) buildGPUDevice() []schedulingv1alpha1.DeviceInfo {
 			},
 			Topology: topology,
 		})
+	}
+	return deviceInfos
+}
+
+func (s *statesInformer) buildRDMADevice() []schedulingv1alpha1.DeviceInfo {
+	rdmaDevices, exist := s.metricsCache.Get(koordletuti.RDMADeviceType)
+	if !exist {
+		klog.V(4).Infof("rdma device not exist")
+	}
+	rdmas := rdmaDevices.(koordletuti.RDMADevices)
+	var deviceInfos []schedulingv1alpha1.DeviceInfo
+	for idx := range rdmas {
+		rdma := rdmas[idx]
+		deviceInfo := schedulingv1alpha1.DeviceInfo{
+			UUID:   rdma.ID,
+			Minor:  pointer.Int32(0),
+			Type:   schedulingv1alpha1.RDMA,
+			Health: true,
+			Resources: map[corev1.ResourceName]resource.Quantity{
+				extension.ResourceRDMA: *resource.NewQuantity(100, resource.DecimalSI),
+			},
+			Topology: &schedulingv1alpha1.DeviceTopology{
+				SocketID: -1,
+				NodeID:   rdma.NodeID,
+				PCIEID:   rdma.PCIE,
+				BusID:    rdma.BusID,
+			},
+		}
+		if rdma.VFEnabled {
+			var vfs []schedulingv1alpha1.VirtualFunction
+			for _, vf := range rdma.VFMap {
+				vfs = append(vfs, schedulingv1alpha1.VirtualFunction{
+					Minor: -1,
+					BusID: vf.ID,
+				})
+			}
+			sort.Slice(vfs, func(i, j int) bool {
+				return vfs[i].BusID < vfs[j].BusID
+			})
+			deviceInfo.VFGroups = append(deviceInfo.VFGroups, schedulingv1alpha1.VirtualFunctionGroup{
+				Labels: nil,
+				VFs:    vfs,
+			})
+		}
+		deviceInfos = append(deviceInfos, deviceInfo)
+	}
+
+	sort.Slice(deviceInfos, func(i, j int) bool {
+		return deviceInfos[i].UUID < deviceInfos[j].UUID
+	})
+	for i := range deviceInfos {
+		deviceInfos[i].Minor = pointer.Int32(int32(i))
 	}
 	return deviceInfos
 }
