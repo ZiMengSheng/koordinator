@@ -63,21 +63,19 @@ const (
 // DeviceAllocations would be injected into Pod as form of annotation during Pre-bind stage.
 /*
 {
-  "gpu": [
+  "rdma": [
     {
       "minor": 0,
+      "id": "0000:09:00.0",
       "resources": {
-        "koordinator.sh/gpu-core": 100,
-        "koordinator.sh/gpu-memory-ratio": 100,
-        "koordinator.sh/gpu-memory": "16Gi"
+        "koordinator.sh/rdma": 100,
       }
     },
     {
       "minor": 1,
+      "id": "0000:10:00.0",
       "resources": {
-        "koordinator.sh/gpu-core": 100,
-        "koordinator.sh/gpu-memory-ratio": 100,
-        "koordinator.sh/gpu-memory": "16Gi"
+        "koordinator.sh/rdma": 100,
       }
     }
   ]
@@ -86,8 +84,10 @@ const (
 type DeviceAllocations map[schedulingv1alpha1.DeviceType][]*DeviceAllocation
 
 type DeviceAllocation struct {
-	Minor     int32                      `json:"minor"`
-	Resources corev1.ResourceList        `json:"resources"`
+	Minor     int32               `json:"minor"`
+	Resources corev1.ResourceList `json:"resources"`
+	// ID is the well known identifier for device, because for some device, such as rdma, Minor is meaningless
+	ID        string                     `json:"id,omitempty"`
 	Extension *DeviceAllocationExtension `json:"extension,omitempty"`
 }
 
