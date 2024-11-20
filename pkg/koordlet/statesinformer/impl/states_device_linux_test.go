@@ -116,8 +116,20 @@ func Test_reportGPUDevice(t *testing.T) {
 		Minor:       4,
 		MemoryTotal: 10000,
 	})
-
+	rdmaDeviceInfo := []koordletutil.RDMADeviceInfo{
+		{
+			BusID:       "0000:00:09.0",
+			DeviceCode:  "0000",
+			DevicePaths: []string{"/dev/infiniband/uverbs0"},
+			ID:          "0000:00:09.0",
+			Labels:      map[string]string{"label1": "value1"},
+			Minor:       5,
+			NetDev:      "ib0",
+			NodeID:      0,
+		},
+	}
 	mockMetricCache.EXPECT().Get(koordletutil.GPUDeviceType).Return(gpuDeviceInfo, true)
+	mockMetricCache.EXPECT().Get(koordletutil.RDMADeviceType).Return(rdmaDeviceInfo, true)
 	r.reportDevice()
 
 	expectedDevices = append(expectedDevices, schedulingv1alpha1.DeviceInfo{
