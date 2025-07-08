@@ -283,86 +283,66 @@ The scheduling process of `NextPod` is as follows:
 
 ![NextPod](/docs/images/networktopology_nextpod.svg)
 
-## Design Details
+## Details
 
 ### Job level preemption algorithm
 
 The job-level preemption algorithm can generally reuse the previous [Proposal](https://github.com/koordinator-sh/koordinator/blob/main/docs/proposals/scheduling/20240115-support-job-level-preemption.md), except that
 1. PostFilter needs to be implemented in the Coscheduling plug-in to facilitate obtaining the Pod to which the Job belongs.
-2. To determine whether the Pod can be successfully scheduled after the Victim is deleted, you need to execute PlanNodesForPodGroup to determine whether the node can meet both the network topology and resource requirements, rather than executing RunFilterWithNominatedNodes to determine whether the node can meet the resource requirements.
+2. To determine whether the Pod can be successfully scheduled after the Victim is deleted, we need to execute PlanNodesForPodGroup to determine whether the node can meet both the network topology and resource requirements, rather than executing RunFilterWithNominatedNodes to determine whether the node can meet the resource requirements.
 ### Network topology gather algorithm 
 
-The Network topology gather algorithm is to find the best nodes for the M Pods, given the M member Pods belonging to a PodGroup, all the Nodes that can place the Pods, the network topology location of each node, and the overall topology hierarchy. Due to its complexity, we will describe the output, output, and final calculation process of Step by Step.
+The network topology gather algorithm is to find the best nodes for the M Pods, given the M member Pods belonging to a PodGroup, all the Nodes that can place the Pods, the network topology location of each node. Due to its complexity, we will use an example to describe the input, output, and overall process of the algorithm.
 
-#### 0. ClusterNetwork Topology Hierarchy
+#### Network topology hierarchy
 
-The network topology architecture of all nodes in the cluster is shown in the following figure, and the nodes are in an idle state.
+First of all, we have a cluster with 12 nodes, named Node0-Node11. The overall network topology of the cluster and the positions of these 12 nodes in the topology are as follows:
 
 ![image](/docs/images/networktopo-4-user-story.png)
 
-|         | Available nodes                         | Create Job                                                   | Scheduling results                                           |
-| ------- | --------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Story 1 | Node0~Node11， total 12 available nodes | podGroup.minNumber=4 (DP=2, PP=2)  <br/>priority_class = best-effort | pod-1-0:node0,  <br/>pod-1-1:node1,  <br/>pod-1-2:node2,  <br/>pod-1-3:node3 |
-| Story 2 | Node4~Node11， total 8 available nodes  | podGroup.minNumber=4( DP=2, PP=2)  <br/>priority_class = best-effort | pod-2-0:node4,  <br/>pod-2-1:node5,  <br/>pod-2-2:node6,  <br/>pod-2-3:node7 |
-| Story 3 | Node8~Node11， total 4 available nodes  | podGroup.minNumber=8( Dp=2, PP=4)  <br/>priority_class = Guarantee | pod-2-0, pod-2-1, pod-2-2, pod-2-3 was eviction。  <br/><br/>Scheduling results：<br/>pod-3-0:node4,<br/>pod-3-1:node5,<br/>pod-3-2:node6,  <br/>pod-3-3:node7,  <br/>pod-3-4:node8,  <br/>pod-3-5:node9,  <br/>pod-3-6:node10,  <br/>pod-3-7:node11 |
+#### Examples with three jobs 
 
-#### 1. Management of Network Topology
-Describe the network topology through node labels and generate a configmap of the network topology within the cluster.
+After the cluster administrator configures `ClusterNetworkTopology` for the cluster, the scheduler will perceive it and build the above network topology in memory. Now we create three jobs in sequence according to the following table. Each member Pod of each job applies for the entire machine resources and prefer to be aggregated into a finer topology domain. 
 
-#### 2. Definition of the Core Structure of Network Topology
-- HyperNode: is a performance domain consisting of a set of nodes or sub performance domains. Within a supernode, the network bandwidth and latency are the same. This custom resource (CRD) is used to describe the network topology in a Kubernetes cluster.
-- Tier: It is a way to distinguish between different energy domains. Within the same level, bandwidth and latency are the same. The smaller the value of the hierarchy, the higher the bandwidth. For example, computing networks and storage networks can be at different levels, or there are several levels (spine, leaf) of switches in the computing network, each level can be identified as a level.
-For example, in network architecture 1 (spine leaf), assuming 8 nodes are connected, as shown in the following figure (both single plane and multi plane can be supported):
+| PodGroup  | MinMember | Parallelism | Preemptible Or Non-Preemptible |
+| --------- | --------- | ----------- | ------------------------------ |
+| PodGroup1 | 4         | DP=2,PP=2   | Preemptible                    |
+| PodGroup2 | 4         | DP=2,PP=2   | Preemptible                    |
+| PodGroup3 | 8         | DP=2,PP=4   | Non-Preemptible                |
 
-![image](/docs/images/networktopo-8-spine-leaf.png)
+Let's see how the scheduler arranges them. When PodGroup1 enter into scheduling,
 
-The format of the Config Map is as follows:
-```
-[
- {
-    "layer": 2,
-    "name": "s2",
-    "children": [
-      "s0",
-      "s1"
-    ]
-  },
-  {
-    "layer": 1,
-    "name": "s0",
-    "parents": [
-      "s2"
-    ],
-    "children": [
-      "node0",
-      "node1"
-    ]
-  },
-  {
-    "layer": 1,
-    "name": "s1",
-    "parents": [
-      "s2"
-    ],
-    "children": [
-      "node2",
-      "node3"
-    ]
-  }
-]
+1. The scheduler finds that Leaf0, Unit2, and Unit3 can all meet its requirements. In order to provide it with better performance, the scheduler tends to choose Unit2 or Unit3.
+2. PodGroup1 is a 4-pod Job. It makes no difference whether it is placed in Unit2 or Unit3. The scheduler places it in Unit2.
 
+When PodGroup2 enter into scheduling, the scheduler finds that both Unit3 and Leaf0 can meet its needs. In order to provide it with better performance, the scheduler tends to choose Unit3.
+
+When PodGroup3 enter into scheduling, the scheduler finds that the cluster resources are insufficient and enters the preemption process. At this time, the scheduler finds that it has multiple choices:
+
+1. Preempt PodGroup1 and schedule it to Node0-Node7
+
+2. Preempt PodGroup2 and schedule it to Node0-Node3 and Node8-Node11
+
+3. Preempt PodGroup1 and PodGroup2 and schedule them to Node4-Node11
+
+Since 3 has higher performance, it will choose to preempt PodGroup1 and PodGroup2 and schedule them to Node4-Node11
+
+#### Algorithm pseudocode
+
+Now, let's formalize the above process. Firstly, let's give the scheduling requirements of PodGroup as follows
+
+```go
+type PodGroupRequirements struct {
+	MinMember             int
+	DataParallelism       int
+	PipelineParallelism   int
+	RequiredTopologyLayer TopologyLayer
+}
 ```
 
+The topological position represented by each parent node on the network topology tree is called a topology node. 
 
-#### 3. Creation and updating of network topology
-Discovery and detection tools for network topology：
-![image](/docs/images/networktopo-9-topo-gen.png)
-
-
-#### 4. Network topology algorithm
-
-4.1 convert multi-layer network topology to hyperNodeTree and sort the hyperNodeTree
-```
+```go
 // multi-layer network topology
 // s3
 //   |
@@ -372,33 +352,36 @@ Discovery and detection tools for network topology：
 //   |- s2-1
 //        |- s1-2: {node-4, node-5}
 //        |- s1-3: {node-6, node-7, node-8, node-9}
+```
 
+Each topology node has a layer attribute and a part of nodes in the network topology tree. 
 
-// convert multi-layer network topology to hyperNodeTree
-hyperNodeTree := map[string][][]string{
+```go
+// convert multi-layer network topology to layeredTopologyNodes
+layeredTopologyNodes := map[string][][]string{
 		"s3": {{"node-0", "node-1", "node-2", "node-3", "node-4", "node-5", "node-6", "node-7", "node-8", "node-9"}},
 		"s2": {{"node-0", "node-1", "node-2", "node-3"}, {"node-4", "node-5", "node-6", "node-7", "node-8", "node-9"}},
 		"s1": {{"node-0", "node-1}", "{node-2", "node-3}", "{node-4", "node-5}", "{node-6", "node-7", "node-8", "node-9"}},
 }
 
-// sort earch layer in hyperNodeTree. 
-hyperNodeTree := map[string][][]string{
+// Sort the topological nodes of each layer according to the number of nodes they have
+layeredTopologyNodes := map[string][][]string{
 		"s3": {{"node-0", "node-1", "node-2", "node-3", "node-4", "node-5", "node-6", "node-7", "node-8", "node-9"}},       // len(s3)=10
 		"s2": {{"node-0", "node-1", "node-2", "node-3"}, {"node-4", "node-5", "node-6", "node-7", "node-8", "node-9"}},     // len(s2-0)=4, len(s2-1)=6, 
 		"s1": {{"node-0", "node-1"}, {"node-2", "node-3"}, {"node-4", "node-5"},{"node-6", "node-7", "node-8", "node-9"}}, // len(s1-2)=2, len(s1-1)=2,len(s1-0)=2,len(s1-3)=4, 
 }
 ```
 
+The essence of the network topology algorithm is to select the topology node with the lowest layer that can place all the member Pods of the Job.
 
-4.2 FindBestNode in sort hyperNodeTree
-```
+```go
 // Pseudocode
-func (nt *NetWorkTopology) FindBestNode(requirements PodGrouprequirements, hyperNodeTree map[string][][]string) ([]string, int) {
+func (nt *NetWorkTopology) FindBestNode(requirements PodGrouprequirements, layeredTopologyNodes map[string][][]string) ([]string, int) {
     // 1. if all node in the same tor
-    tieIndex := s1
-    for _, hyperNodes := range hyperNodeTree[s1] {
-        if len(hyperNodes) >= minNumberWorker {
-            return hyperNodes[:minNumberWorker], tieIndex
+    layerIndex := s1
+    for _, nodesOfSomeTopologyNode := range layeredTopologyNodes[s1] {
+        if len(nodesOfSomeTopologyNode) >= minNumberWorker {
+            return nodesOfSomeTopologyNode[:minNumberWorker], layerIndex
         }
     }
 
@@ -437,7 +420,7 @@ func (nt *NetWorkTopology) FindBestNode(requirements PodGrouprequirements, hyper
 
 
 
-```
+```go
 // detail
 func (nt *NetWorkTopology) FindBestNode(requirements PodGrouprequirements, hyperNodeTree map[string][][]string) ([]string, int) {
     minNumberWorker := requirements.MinMember
@@ -510,7 +493,7 @@ func (nt *NetWorkTopology) FindBestNode(requirements PodGrouprequirements, hyper
 }
 ```
 
-```
+```go
 func (nt *NetWorkTopology) ppSameHyperNode(hyperNodeList [][]string, dpRemainCnt int, pipelineParallel int) (bool, []string, [][]string) {
 	var resNode []string
 	var remainNodes [][]string
